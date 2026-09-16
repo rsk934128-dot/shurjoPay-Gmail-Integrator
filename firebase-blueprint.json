@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Payment": {
+      "title": "Payment",
+      "description": "Represents a shurjoPay payment transaction.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "The UID of the user who initiated the payment." },
+        "orderId": { "type": "string", "description": "The merchant's unique order ID." },
+        "spOrderId": { "type": "string", "description": "The shurjoPay unique order ID." },
+        "amount": { "type": "number", "description": "The transaction amount." },
+        "currency": { "type": "string", "description": "The currency (e.g., BDT)." },
+        "status": { "type": "string", "enum": ["pending", "success", "failed", "cancelled"], "description": "The current status of the payment." },
+        "customerName": { "type": "string", "description": "Name of the customer." },
+        "customerEmail": { "type": "string", "description": "Email of the customer." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the record was created." },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When the record was last updated." }
+      },
+      "required": ["userId", "orderId", "amount", "currency", "status", "createdAt", "updatedAt"]
+    },
+    "UserSettings": {
+      "title": "UserSettings",
+      "description": "User preferences for notifications and other features.",
+      "type": "object",
+      "properties": {
+        "emailNotificationsEnabled": { "type": "boolean", "description": "Whether to send automatic Gmail notifications for new payments." },
+        "theme": { "type": "string", "enum": ["light", "dark"], "description": "The user's preferred visual theme." },
+        "visibleCards": {
+          "type": "object",
+          "properties": {
+            "payments": { "type": "boolean" },
+            "history": { "type": "boolean" },
+            "gmail": { "type": "boolean" }
+          }
+        },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When the settings were last updated." }
+      },
+      "required": ["emailNotificationsEnabled", "theme", "visibleCards", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Collection of payment records."
+    },
+    "/userSettings/{userId}": {
+      "schema": "UserSettings",
+      "description": "User-specific settings and preferences."
+    }
+  }
+}

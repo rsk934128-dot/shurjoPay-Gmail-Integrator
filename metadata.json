@@ -1,0 +1,6 @@
+{
+  "name": "shurjoPay & Gmail Integrator",
+  "description": "A full-stack application integrating shurjoPay V2 Gateway for secure payments and Gmail for communication management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

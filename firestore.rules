@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Common helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(data) {
+      return isSignedIn() && data.userId == request.auth.uid;
+    }
+
+    // Payment Validation Blueprint
+    function isValidPayment(data) {
+      return data.userId == request.auth.uid
+        && data.orderId is string && data.orderId.size() <= 100
+        && data.amount is number && data.amount > 0
+        && data.currency is string && data.currency.size() == 3
+        && data.status in ['pending', 'success', 'failed', 'cancelled']
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    // Payments Collection
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && isOwner(existing());
+      allow list: if isSignedIn() && existing().userId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+        && isValidId(paymentId)
+        && isValidPayment(incoming())
+        && incoming().keys().hasAll(['userId', 'orderId', 'amount', 'currency', 'status', 'createdAt', 'updatedAt'])
+        && incoming().keys().size() >= 7 && incoming().keys().size() <= 10;
+
+      allow update: if isSignedIn()
+        && isOwner(existing())
+        && incoming().userId == existing().userId
+        && incoming().orderId == existing().orderId
+        && incoming().amount == existing().amount
+        && incoming().currency == existing().currency
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update status
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt', 'spOrderId'])
+        );
+    }
+
+    // UserSettings Collection
+    match /userSettings/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() 
+        && request.auth.uid == userId
+        && incoming().emailNotificationsEnabled is bool
+        && incoming().updatedAt == request.time;
+    }
+
+    // Email Templates Collection
+    match /emailTemplates/{templateId} {
+      allow read, delete: if isSignedIn() && isOwner(existing());
+      allow create: if isSignedIn() 
+        && incoming().userId == request.auth.uid
+        && incoming().name is string
+        && incoming().subject is string
+        && incoming().body is string
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isOwner(existing())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+  }
+}
