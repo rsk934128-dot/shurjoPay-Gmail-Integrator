@@ -12,6 +12,36 @@
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="theme-color" content="#2563eb" />
+    <script>
+      // Suppress known benign environment errors to keep the console clean
+      (function() {
+        const originalError = console.error;
+        const originalWarn = console.warn;
+        
+        const isBenign = (args) => {
+          return args.some(arg => {
+            const msg = typeof arg === 'string' ? arg : (arg && arg.message ? arg.message : '');
+            return (
+              msg.includes('Failed to connect to MetaMask') ||
+              msg.includes('[vite] failed to connect to websocket') ||
+              msg.includes('MetaMask: ') ||
+              msg.includes('WebSocket connection to') ||
+              msg.includes('failed to connect to websocket')
+            );
+          });
+        };
+
+        console.error = function(...args) {
+          if (isBenign(args)) return;
+          originalError.apply(console, args);
+        };
+
+        console.warn = function(...args) {
+          if (isBenign(args)) return;
+          originalWarn.apply(console, args);
+        };
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

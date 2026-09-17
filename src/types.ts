@@ -29,6 +29,8 @@ export interface UserSettings {
     history: boolean;
     gmail: boolean;
   };
+  emailSubjectTemplate?: string;
+  emailBodyTemplate?: string;
   updatedAt: any;
 }
 

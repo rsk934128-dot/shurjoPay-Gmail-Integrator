@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { History, Clock, CheckCircle2, XCircle, AlertCircle, BarChart3, ShieldCheck, Terminal, X, RefreshCw } from 'lucide-react';
+import { History, Clock, CheckCircle2, XCircle, AlertCircle, BarChart3, ShieldCheck, Terminal, X, RefreshCw, Download } from 'lucide-react';
 import { 
   AreaChart, 
   Area, 
@@ -9,13 +9,20 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
-import { getUserPayments, updatePaymentStatus } from '../lib/firestore';
-import { Payment } from '../types';
+import { getUserPayments, updatePaymentStatus, getUserSettings } from '../lib/firestore';
+import { Payment, UserSettings } from '../types';
 import { formatCurrency } from '../lib/formatters';
 import { fetchWithRetry } from '../lib/api-utils';
+import { sendEmail } from '../lib/gmail';
+import { replaceTemplates } from '../lib/template-utils';
+import { auth } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function PaymentHistory() {
+interface PaymentHistoryProps {
+  accessToken?: string;
+}
+
+export default function PaymentHistory({ accessToken }: PaymentHistoryProps) {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [diagnosticInfo, setDiagnosticInfo] = useState<any>(null);
@@ -57,6 +64,28 @@ export default function PaymentHistory() {
       // If success, update Firestore
       if (data[0]?.bank_status === 'Success') {
         await updatePaymentStatus(payment.id!, payment.spOrderId, 'success');
+        
+        // Auto-send Gmail notification if enabled
+        try {
+          const settings = await getUserSettings();
+          if (settings.emailNotificationsEnabled && accessToken) {
+            const templateData = {
+              orderId: payment.orderId,
+              amount: payment.amount,
+              currency: payment.currency,
+              customerName: payment.customerName
+            };
+            
+            const subject = replaceTemplates(settings.emailSubjectTemplate || 'Payment Confirmation - Order #{orderId}', templateData);
+            const body = replaceTemplates(settings.emailBodyTemplate || 'Dear Customer,\n\nWe have successfully received your payment of {amount} {currency} for Order #{orderId}.\n\nThank you for choosing shurjoPay v2.\n\nBest regards,\nYour Support Team', templateData);
+            
+            await sendEmail(accessToken, payment.customerEmail, subject, body);
+            console.log('Confirmation email sent manually via Gmail');
+          }
+        } catch (emailErr) {
+          console.error('Failed to auto-send email during manual verification:', emailErr);
+        }
+
         fetchPayments();
       }
     } catch (error: any) {
@@ -96,6 +125,39 @@ export default function PaymentHistory() {
     }));
   }, [payments]);
 
+  const exportToCSV = () => {
+    if (!payments.length) return;
+
+    const headers = ['Date', 'Order ID', 'Amount', 'Currency', 'Customer', 'Status', 'SP Order ID'];
+    const rows = payments.map(p => {
+      const date = p.createdAt?.toDate ? p.createdAt.toDate().toLocaleString() : new Date().toLocaleString();
+      return [
+        `"${date}"`,
+        `"${p.orderId}"`,
+        p.amount,
+        `"${p.currency}"`,
+        `"${p.customerName}"`,
+        `"${p.status.toUpperCase()}"`,
+        `"${p.spOrderId || ''}"`
+      ];
+    });
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `transactions_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const getStatusIcon = (status: Payment['status']) => {
     switch (status) {
       case 'success': return <CheckCircle2 className="w-4 h-4 text-green-500" />;
@@ -118,11 +180,21 @@ export default function PaymentHistory() {
     <div className="p-6 bg-white rounded-2xl border border-neutral-200 shadow-sm h-full flex flex-col">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-neutral-50 rounded-lg">
-            <History className="w-5 h-5 text-neutral-600" />
+          <div className="p-2 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
+            <History className="w-5 h-5 text-neutral-600 dark:text-neutral-400" />
           </div>
-          <h2 className="text-xl font-semibold text-neutral-900">Transaction History</h2>
+          <h2 className="text-xl font-semibold text-neutral-900 dark:text-white">Transaction History</h2>
         </div>
+        
+        {payments.length > 0 && (
+          <button
+            onClick={exportToCSV}
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 text-xs font-bold rounded-xl transition-all border border-neutral-200 dark:border-neutral-700 active:scale-95"
+          >
+            <Download className="w-4 h-4" />
+            EXPORT CSV
+          </button>
+        )}
       </div>
 
       {!loading && chartData.length > 0 && (

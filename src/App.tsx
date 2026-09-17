@@ -7,7 +7,8 @@ import {
   Mail, 
   Wallet,
   Loader2,
-  ShieldCheck
+  ShieldCheck,
+  AlertCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { initAuth, googleSignIn, logout } from './lib/auth';
@@ -15,19 +16,27 @@ import { subscribeToUserSettings } from './lib/firestore';
 import ShurjoPay from './components/ShurjoPay';
 import GmailIntegrator from './components/GmailIntegrator';
 import PaymentHistory from './components/PaymentHistory';
+import PaymentVisualization from './components/PaymentVisualization';
 import SettingsPanel from './components/SettingsPanel';
+import EmailTemplates from './components/EmailTemplates';
 import PaymentDebugger from './components/PaymentDebugger';
+import ConnectivityStatus from './components/ConnectivityStatus';
+import LandingPage from './components/LandingPage';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { useToast } from './components/Toast';
 import { UserSettings } from './types';
 import { formatCurrency } from './lib/formatters';
 import { fetchWithRetry } from './lib/api-utils';
+import { sendEmail } from './lib/gmail';
+import { replaceTemplates } from './lib/template-utils';
+import { savePayment, updatePaymentStatus } from './lib/firestore';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showLanding, setShowLanding] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'payments' | 'gmail'>('dashboard');
   const { showToast } = useToast();
@@ -76,7 +85,30 @@ export default function App() {
         const data = await response.json();
         
         if (data && data[0] && data[0].sp_code === '1000') {
-          showToast(`Payment verified successfully! Amount: ${formatCurrency(Number(data[0].amount), data[0].currency)}`, 'success');
+          const amount = Number(data[0].amount);
+          const currency = data[0].currency;
+          showToast(`Payment verified successfully! Amount: ${formatCurrency(amount, currency)}`, 'success');
+          
+          // Auto-send Gmail notification if enabled
+          if (settings?.emailNotificationsEnabled && token) {
+            try {
+              const customerName = data[0].customer_name || user?.displayName || 'Customer';
+              const templateData = {
+                orderId: order_id,
+                amount: amount,
+                currency: currency,
+                customerName: customerName
+              };
+              
+              const subject = replaceTemplates(settings.emailSubjectTemplate || 'Payment Confirmation - Order #{orderId}', templateData);
+              const body = replaceTemplates(settings.emailBodyTemplate || 'Dear Customer,\n\nWe have successfully received your payment of {amount} {currency} for Order #{orderId}.\n\nThank you for choosing shurjoPay v2.\n\nBest regards,\nYour Support Team', templateData);
+              
+              await sendEmail(token, data[0].customer_email || user?.email || '', subject, body);
+              showToast('Confirmation email sent automatically via Gmail', 'info');
+            } catch (emailErr) {
+              console.error('Failed to auto-send email:', emailErr);
+            }
+          }
         } else {
           showToast('Payment verification failed or was cancelled.', 'error');
         }
@@ -104,6 +136,8 @@ export default function App() {
         setError('The login popup was blocked by your browser. Please allow popups for this site and try again.');
       } else if (err.code === 'auth/network-request-failed') {
         setError('Network error. Please check your connection and try again.');
+      } else if (err.code === 'auth/unauthorized-domain') {
+        setError('This domain is not authorized for Firebase Authentication.');
       } else {
         setError('Failed to sign in. Please ensure popups are allowed and try again.');
       }
@@ -121,6 +155,7 @@ export default function App() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neutral-50">
+        <ConnectivityStatus />
         <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
       </div>
     );
@@ -128,48 +163,90 @@ export default function App() {
 
   if (!user || !token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-white p-8 rounded-3xl border border-neutral-200 shadow-xl text-center"
-        >
-          <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
-            <ShieldCheck className="w-8 h-8 text-blue-600" />
-          </div>
-          <h1 className="text-3xl font-bold text-neutral-900 mb-2">shurjoPay & Gmail</h1>
-          <p className="text-neutral-500 mb-8">Securely manage your payments and communications in one place.</p>
-          
-          {error && (
-            <motion.div 
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="mb-6 p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100"
-            >
-              {error}
-            </motion.div>
-          )}
-
-          <button 
-            onClick={handleLogin}
-            disabled={loading}
-            className="w-full flex items-center justify-center gap-3 py-4 bg-white hover:bg-neutral-50 border border-neutral-300 rounded-xl transition-all shadow-sm group"
+      <AnimatePresence mode="wait">
+        {showLanding ? (
+          <motion.div
+            key="landing"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="w-full"
           >
-            <svg className="w-5 h-5" viewBox="0 0 48 48">
-              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-            </svg>
-            <span className="text-neutral-700 font-medium group-hover:text-neutral-900">Sign in with Google</span>
-          </button>
-        </motion.div>
-      </div>
+            <ConnectivityStatus />
+            <LandingPage onGetStarted={() => setShowLanding(false)} />
+          </motion.div>
+        ) : (
+          <motion.div
+            key="login"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.05 }}
+            className="min-h-screen flex items-center justify-center bg-neutral-50 p-4 w-full"
+          >
+            <ConnectivityStatus />
+            <div className="max-w-md w-full bg-white p-8 rounded-3xl border border-neutral-200 shadow-xl text-center">
+              <button 
+                onClick={() => setShowLanding(true)}
+                className="mb-8 text-xs font-bold text-neutral-400 hover:text-neutral-600 flex items-center justify-center gap-2 mx-auto transition-colors"
+              >
+                ← Back to Information
+              </button>
+              <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                <ShieldCheck className="w-8 h-8 text-blue-600" />
+              </div>
+              <h1 className="text-3xl font-bold text-neutral-900 mb-2">shurjoPay & Gmail</h1>
+              <p className="text-neutral-500 mb-8">Securely manage your payments and communications in one place.</p>
+              
+              {error && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-6 p-4 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 text-left space-y-2"
+                >
+                  <div className="flex items-center gap-2 font-bold">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Login Error</span>
+                  </div>
+                  <p>{error}</p>
+                  {error.includes('blocked') && (
+                    <div className="text-[11px] text-blue-600 bg-blue-100/50 p-2 rounded-lg mt-2">
+                      <strong>Notice:</strong> Your browser blocked the login popup. We are now attempting to sign you in via a page redirect. Please wait...
+                    </div>
+                  )}
+                </motion.div>
+              )}
+
+              <button 
+                onClick={handleLogin}
+                disabled={loading}
+                className="w-full flex items-center justify-center gap-3 py-4 bg-white hover:bg-neutral-50 border border-neutral-300 rounded-xl transition-all shadow-sm group active:scale-[0.98]"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                </svg>
+                <span className="text-neutral-700 font-medium group-hover:text-neutral-900">Sign in with Google</span>
+              </button>
+
+              <div className="mt-8 pt-6 border-t border-neutral-100">
+                <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold mb-2">Environment Notes</p>
+                <div className="space-y-1 text-left">
+                  <p className="text-[9px] text-neutral-400">• <strong>MetaMask Error:</strong> Safe to ignore. Caused by browser extensions.</p>
+                  <p className="text-[9px] text-neutral-400">• <strong>Vite Connection:</strong> Normal in this dev environment.</p>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     );
   }
 
   return (
     <div className={`min-h-screen flex ${settings?.theme === 'dark' ? 'dark bg-neutral-950' : 'bg-neutral-50'}`}>
+      <ConnectivityStatus />
       {/* Sidebar */}
       <aside className={`w-64 border-r p-6 flex flex-col fixed h-full transition-colors ${
         settings?.theme === 'dark' ? 'bg-neutral-900 border-neutral-800' : 'bg-white border-neutral-200'
@@ -255,21 +332,27 @@ export default function App() {
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
-              className="grid grid-cols-1 lg:grid-cols-2 gap-8"
+              className="space-y-8"
             >
-              <div className="space-y-8">
-                {(!settings || settings.visibleCards.payments) && (
-                  <ShurjoPay customerName={user.displayName || ''} customerEmail={user.email || ''} />
-                )}
-                <SettingsPanel />
-                {(!settings || settings.visibleCards.history) && (
-                  <PaymentHistory />
-                )}
-              </div>
-              <div className="h-[calc(100vh-8rem)]">
-                {(!settings || settings.visibleCards.gmail) && (
-                  <GmailIntegrator accessToken={token} />
-                )}
+              <PaymentVisualization />
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                <div className="space-y-8">
+                  {(!settings || settings.visibleCards.payments) && (
+                    <ShurjoPay customerName={user.displayName || ''} customerEmail={user.email || ''} />
+                  )}
+                  <SettingsPanel />
+                  {settings?.emailNotificationsEnabled && (
+                    <EmailTemplates />
+                  )}
+                  {(!settings || settings.visibleCards.history) && (
+                    <PaymentHistory accessToken={token || ''} />
+                  )}
+                </div>
+                <div className="h-[calc(100vh-8rem)]">
+                  {(!settings || settings.visibleCards.gmail) && (
+                    <GmailIntegrator accessToken={token} />
+                  )}
+                </div>
               </div>
             </motion.div>
           )}
@@ -284,7 +367,7 @@ export default function App() {
             >
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <ShurjoPay customerName={user.displayName || ''} customerEmail={user.email || ''} />
-                <PaymentHistory />
+                <PaymentHistory accessToken={token || ''} />
               </div>
             </motion.div>
           )}

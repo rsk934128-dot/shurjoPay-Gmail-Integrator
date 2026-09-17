@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Terminal, ChevronDown, ChevronUp, Trash2, ShieldCheck, AlertCircle, Clock, Search } from 'lucide-react';
+import { Terminal, ChevronDown, ChevronUp, Trash2, ShieldCheck, AlertCircle, Clock, Search, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export interface LogEntry {
@@ -17,7 +17,16 @@ export default function PaymentDebugger() {
   const [isOpen, setIsOpen] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filter, setFilter] = useState('');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const handleCopy = (id: string, content: any) => {
+    const text = typeof content === 'string' ? content : JSON.stringify(content, null, 2);
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    });
+  };
 
   useEffect(() => {
     // Intercept fetch calls to capture payment status requests
@@ -243,6 +252,13 @@ export default function PaymentDebugger() {
 
                   {log.payload && (
                     <div className="relative group">
+                      <button
+                        onClick={() => handleCopy(log.id, log.payload)}
+                        className="absolute right-2 top-2 p-1.5 bg-neutral-800/80 hover:bg-neutral-700 rounded-md text-neutral-400 hover:text-white transition-all opacity-0 group-hover:opacity-100 backdrop-blur-sm border border-neutral-700/50"
+                        title="Copy to clipboard"
+                      >
+                        {copiedId === log.id ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
                       <pre className="text-[10px] bg-neutral-950 p-2 rounded-lg border border-neutral-800 overflow-x-auto text-neutral-400 max-h-32">
                         {JSON.stringify(log.payload, null, 2)}
                       </pre>

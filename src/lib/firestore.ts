@@ -80,6 +80,8 @@ export const getUserSettings = async (): Promise<UserSettings> => {
       history: true,
       gmail: true,
     },
+    emailSubjectTemplate: 'Payment Confirmation - Order #{orderId}',
+    emailBodyTemplate: 'Dear Customer,\n\nWe have successfully received your payment of {amount} {currency} for Order #{orderId}.\n\nThank you for choosing our service.\n\nBest regards,\nYour Support Team',
     updatedAt: Timestamp.now()
   };
 };
@@ -99,6 +101,8 @@ export const subscribeToUserSettings = (userId: string, callback: (settings: Use
           history: true,
           gmail: true,
         },
+        emailSubjectTemplate: 'Payment Confirmation - Order #{orderId}',
+        emailBodyTemplate: 'Dear Customer,\n\nWe have successfully received your payment of {amount} {currency} for Order #{orderId}.\n\nThank you for choosing our service.\n\nBest regards,\nYour Support Team',
         updatedAt: Timestamp.now()
       });
     }

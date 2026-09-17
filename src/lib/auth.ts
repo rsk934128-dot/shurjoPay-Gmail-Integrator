@@ -1,6 +1,8 @@
 import { 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   onAuthStateChanged, 
   User, 
   signOut 
@@ -23,6 +25,19 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  // Handle the result of a redirect sign-in
+  getRedirectResult(auth).then((result) => {
+    if (result) {
+      const credential = GoogleAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        setCachedToken(credential.accessToken);
+        if (onAuthSuccess) onAuthSuccess(result.user, credential.accessToken);
+      }
+    }
+  }).catch((error) => {
+    console.error('Redirect sign-in error:', error);
+  });
+
   return onAuthStateChanged(auth, async (user: User | null) => {
     if (user) {
       const token = getCachedToken();
@@ -55,6 +70,14 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string 
     return { user: result.user, accessToken: credential.accessToken };
   } catch (error: any) {
     console.error('Sign in error:', error);
+    
+    // If popup is blocked, attempt redirect instead
+    if (error.code === 'auth/popup-blocked') {
+      console.log('Popup blocked, switching to redirect...');
+      await signInWithRedirect(auth, provider);
+      return null; // The page will redirect, so we don't return anything yet
+    }
+    
     throw error;
   } finally {
     isSigningIn = false;
